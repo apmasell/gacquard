@@ -1,401 +1,12 @@
-struct weft_line {
-	Gdk.Color colour;
-	bool[] warps;
-
-	internal weft_line(int length, Gdk.Color colour) {
-		warps = new bool[length];
-		this.colour = colour;
-	}
-
-	internal void delete(int position) {
-		for (var it = position; it < warps.length-1; it++) {
-			warps[it] = warps[it+1];
-		}
-		warps.resize(warps.length-1);
-	}
-	internal void insert(int position) {
-		var new_warps = new bool[warps.length+1];
-		for (var it = 0; it < warps.length; it++) {
-			new_warps[it+(it < position ? 0 : 1)] = warps[it];
-		}
-		warps = (owned) new_warps;
-	}
-
-	internal void to_file(FileStream file) {
-		file.printf("%s ", colour.to_string());
-		foreach (var b in warps) {
-			file.printf("%c", b ? '|' : '-');
-		}
-		file.putc('\n');
-	}
-}
-
-class LoomMenu : Gtk.Menu {
-	private LoomPattern pattern;
-	internal int warp = -1;
-	internal int weft = -1;
-
-	internal LoomMenu(LoomPattern pattern) {
-		this.pattern = pattern;
-
-		var warp_before = new Gtk.MenuItem.with_label("Insert Warp Before");
-		var warp_after = new Gtk.MenuItem.with_label("Insert Warp After");
-		var warp_colour = new Gtk.MenuItem.with_label("Set Warp Colour");
-		var warp_delete = new Gtk.MenuItem.with_label("Delete Warp");
-		var sep = new Gtk.SeparatorMenuItem();
-		var weft_before = new Gtk.MenuItem.with_label("Insert Weft Before");
-		var weft_after = new Gtk.MenuItem.with_label("Insert Weft After");
-		var weft_colour = new Gtk.MenuItem.with_label("Set Weft Colour");
-		var weft_delete = new Gtk.MenuItem.with_label("Delete Weft");
-
-		warp_before.activate.connect(() => { this.pattern.insert_warp(this.warp); });
-		warp_after.activate.connect(() => { this.pattern.insert_warp(this.warp+1); });
-		warp_colour.activate.connect(() => { this.choose_colour(true); });
-		warp_delete.activate.connect(() => { this.pattern.delete_warp(this.warp); });
-		weft_before.activate.connect(() => { this.pattern.insert_weft(this.weft); });
-		weft_after.activate.connect(() => { this.pattern.insert_weft(this.weft+1); });
-		weft_colour.activate.connect(() => { this.choose_colour(false); });
-		weft_delete.activate.connect(() => { this.pattern.delete_weft(this.weft); });
-
-		this.append(warp_before);
-		this.append(warp_after);
-		this.append(warp_colour);
-		this.append(warp_delete);
-		this.append(sep);
-		this.append(weft_before);
-		this.append(weft_after);
-		this.append(weft_colour);
-		this.append(weft_delete);
-
-		warp_before.show();
-		warp_after.show();
-		warp_colour.show();
-		warp_delete.show();
-		sep.show();
-		weft_before.show();
-		weft_after.show();
-		weft_colour.show();
-		weft_delete.show();
-	}
-
-	void choose_colour(bool is_warp) {
-		var dialog = new Gtk.ColorSelectionDialog(@"Select $(is_warp ? "Warp " : "Weft") Colour");
-		((Gtk.ColorSelection)dialog.color_selection).current_color = is_warp ? pattern.get_warp_colour(warp) : pattern.get_weft_colour(weft);
-
-		((Gtk.Button)dialog.cancel_button).clicked.connect(() => {
-			   dialog.destroy();
-		   });
-		((Gtk.Button)dialog.ok_button).clicked.connect(() => {
-				  if (is_warp) {
-				    pattern.set_warp_colour(warp, ((Gtk.ColorSelection)dialog.color_selection).current_color);
-				  } else {
-				    pattern.set_weft_colour(weft, ((Gtk.ColorSelection)dialog.color_selection).current_color);
-				  }
-				  pattern.queue_draw();
-				  dialog.destroy();
-				});
-		dialog.run();
-	}
-}
-
-public class LoomPattern : Gtk.Widget {
-
-	private LoomMenu menu;
-
-	private Gdk.Color[] warp_colours;
-
-	private weft_line[] wefts;
-
-	public int box_size { get; set; default = 30; }
-
-	public int weft_count {
-		get {
-			return wefts.length;
-		}
-	}
-
-	public int warp_count {
-		get {
-			return warp_colours.length;
-		}
-	}
-
-	public signal void weft_count_changed(int count);
-
-	construct {
-		menu = new LoomMenu(this);
-	}
-
-	public static LoomPattern? open(string filename) {
-		var file = FileStream.open(filename, "r");
-		if (file == null) {
-			warning("Unable to open file %s\n", filename);
-			return null;
-		}
-		var colours = (file.read_line()?? "").split(" ");
-		if (colours[0] != "GACQUARD") {
-			warning("Bad header in %s\n", filename);
-			return null;
-		}
-		var warp_colours = new Gdk.Color[colours.length-1];
-		for (var it = 0; it < warp_colours.length; it++) {
-			if (!Gdk.Color.parse(colours[it+1], out warp_colours[it])) {
-				warning("Bad warp colour %s in %s\n", colours[it+1], filename);
-				return null;
-			}
-		}
-
-		weft_line[] wefts = {};
-		string line;
-		while ((line = file.read_line()) != null) {
-			var parts = line.split(" ");
-			Gdk.Color colour = {};
-			if (parts.length != 2) {
-				warning("Bad weft line `%s' in %s: wrong number of spaces\n", line, filename);
-				return null;
-			}
-			if (parts[1].length != colours.length-1) {
-				warning("Bad weft line `%s' in %s: wrong number of warps\n", line, filename);
-				return null;
-			}
-			if (!Gdk.Color.parse(parts[0], out colour)) {
-				warning("Bad weft color `%s' in %s\n", parts[0], filename);
-				return null;
-			}
-
-			wefts += weft_line(colours.length, colour);
-
-			for (var it = 0; it < colours.length; it++) {
-				wefts[wefts.length-1].warps[it] = parts[1][it] == '|';
-			}
-		}
-		if (wefts.length == 0) {
-			warning("No weft lines in %s\n", filename);
-			return null;
-		}
-		return new LoomPattern.array((owned) warp_colours, (owned) wefts);
-	}
-
-	public LoomPattern(int warps, int wefts, Gdk.Color weft_colour, Gdk.Color warp_colour) {
-		warp_colours = new Gdk.Color[warps];
-		for (var it = 0; it < warps; it++) {
-			warp_colours[it] = warp_colour;
-		}
-		this.wefts = new weft_line[wefts];
-		for (var it = 0; it < wefts; it++) {
-			this.wefts[it] = weft_line(warps, weft_colour);
-		}
-	}
-
-	LoomPattern.array(owned Gdk.Color[] colours, owned weft_line[] wefts) {
-		warp_colours = (owned) colours;
-		this.wefts = (owned) wefts;
-	}
-
-	public override bool button_press_event(Gdk.EventButton event) {
-		if (event.type == Gdk.EventType.BUTTON_PRESS) {
-			int warp = (int) (event.x/box_size)%warp_colours.length;
-			int weft = (int) (event.y/box_size)%wefts.length;
-			if (event.button == 1) {
-				this.wefts[weft].warps[warp] = !this.wefts[weft].warps[warp];
-				queue_draw();
-			} else if (event.button == 3) {
-				menu.warp = warp;
-				menu.weft = weft;
-				menu.show();
-				menu.popup(null, null, null, event.button, event.time);
-			} else {
-				return false;
-			}
-			return true;
-		}
-		return false;
-	}
-
-	public void delete_warp(int position) requires(position >= 0 && position < warp_count) {
-		if (warp_colours.length == 1)
-			return;
-		for (var it = 0; it < wefts.length; it++) {
-			wefts[it].delete(position);
-		}
-		for (var it = position; it < warp_colours.length-1; it++) {
-			warp_colours[it] = warp_colours[it+1];
-		}
-		warp_colours.resize(warp_colours.length-1);
-		queue_resize();
-	}
-
-	public void delete_weft(int position) requires(position >= 0 && position < weft_count) {
-		if (wefts.length == 1)
-			return;
-		for (var it = position; it < wefts.length-1; it++) {
-			wefts[it] = (owned) wefts[it+1];
-		}
-		wefts[wefts.length-1] = {};
-		wefts.resize(wefts.length-1);
-		weft_count_changed(wefts.length);
-		queue_resize();
-	}
-
-	public override bool expose_event(Gdk.EventExpose event) {
-		var box_size = this.box_size;
-		var context = Gdk.cairo_create(event.window);
-		context.rectangle(event.area.x, event.area.y, event.area.width, event.area.height);
-		context.clip();
-		context.set_line_width(1);
-		var max_wefts = allocation.height/box_size+1;
-		var max_warps = allocation.width/box_size+1;
-		for (var weft = 0; weft < max_wefts; weft++) {
-			for (var warp = 0; warp < max_warps; warp++) {
-				var top = wefts[weft%wefts.length].warps[warp%warp_colours.length];
-				Gdk.cairo_set_source_color(context, top ? warp_colours[warp%warp_colours.length] : wefts[weft%wefts.length].colour);
-				context.rectangle(warp*box_size, weft*box_size, box_size, box_size);
-				context.fill();
-				context.set_source_rgba(0, 0, 0, (weft < wefts.length && warp < warp_colours.length) ? 1 : 0.5);
-				context.rectangle(warp*box_size, weft*box_size, box_size, box_size);
-				context.stroke();
-				if (top) {
-					context.move_to(warp*box_size+box_size/2, weft*box_size+box_size/4);
-					context.rel_line_to(0, box_size/2);
-				} else {
-					context.move_to(warp*box_size+box_size/4, weft*box_size+box_size/2);
-					context.rel_line_to(box_size/2, 0);
-				}
-				context.stroke();
-			}
-		}
-		return true;
-	}
-
-	public void insert_warp(int position, Gdk.Color? colour = null) requires(position >= 0 && position <= warp_count) {
-		for (var it = 0; it < wefts.length; it++) {
-			wefts[it].insert(position);
-		}
-		var new_warp_colours = new Gdk.Color[warp_colours.length+1];
-		for (var it = 0; it < warp_colours.length; it++) {
-			new_warp_colours[it+(it < position ? 0 : 1)] = warp_colours[it];
-		}
-		new_warp_colours[position] = colour ?? warp_colours[position == 0 ? 1 : position-1];
-		warp_colours = (owned) new_warp_colours;
-		queue_resize();
-	}
-
-	public void insert_weft(int position, Gdk.Color? colour = null) requires(position >= 0 && position <= weft_count) {
-		var length = warp_colours.length;
-		wefts.resize(wefts.length+1);
-		for (var it = wefts.length-2; it >= position; it--) {
-			wefts[it+1] = (owned) wefts[it];
-		}
-		wefts[position] = weft_line(length, colour ?? wefts[position == 0 ? 1 : position-1].colour);
-		weft_count_changed(wefts.length);
-		queue_resize();
-	}
-
-	public override void size_request(out Gtk.Requisition requisition) {
-		requisition = Gtk.Requisition();
-		requisition.width = warp_colours.length*box_size;
-		requisition.height = wefts.length*box_size;
-	}
-
-	public override void realize() {
-		var attrs = Gdk.WindowAttr() {
-			window_type = Gdk.WindowType.CHILD,
-			wclass = Gdk.WindowClass.INPUT_OUTPUT,
-			event_mask = get_events()|Gdk.EventMask.EXPOSURE_MASK|Gdk.EventMask.BUTTON_PRESS_MASK
-		};
-		this.window = new Gdk.Window(get_parent_window(), attrs, 0);
-		this.window.move_resize(this.allocation.x, this.allocation.y, this.allocation.width, this.allocation.height);
-		this.window.set_user_data(this);
-		this.style = this.style.attach(this.window);
-		this.style.set_background(this.window, Gtk.StateType.NORMAL);
-		set_flags(Gtk.WidgetFlags.REALIZED);
-	}
-
-	public new bool get(int warp, int weft) requires(warp >= 0 && warp<warp_count && weft >= 0 && weft < weft_count) {
-		return wefts[weft].warps[warp];
-	}
-
-	public Gdk.Color get_warp_colour(int warp) requires(warp >= 0 && warp < warp_count) {
-		return warp_colours[warp];
-	}
-
-	public Gdk.Color get_weft_colour(int weft) requires(weft >= 0 && weft < weft_count) {
-		return wefts[weft].colour;
-	}
-
-	public new void set(int warp, int weft, bool @value) requires(warp >= 0 && warp<warp_count && weft >= 0 && weft < weft_count) {
-		wefts[weft].warps[warp] = @value;
-	}
-
-	public void set_warp_colour(int warp, Gdk.Color colour) requires(warp >= 0 && warp < warp_count) {
-		warp_colours[warp] = colour;
-	}
-
-	public void set_weft_colour(int weft, Gdk.Color colour) requires(weft >= 0 && weft < weft_count) {
-		wefts[weft].colour = colour;
-	}
-
-	public void to_file(FileStream file) {
-		file.printf("GACQUARD");
-		foreach (var colour in warp_colours) {
-			file.printf(" %s", colour.to_string());
-		}
-		file.putc('\n');
-		for (var it = 0; it < wefts.length; it++) {
-			wefts[it].to_file(file);
-		}
-	}
-}
-
-class LoomCard : Gtk.DrawingArea {
-	weak Gacquard controller;
-	internal LoomCard(Gacquard controller) {
-		this.controller = controller;
-		set_size_request(100, 100);
-	}
-	public override bool expose_event(Gdk.EventExpose event) {
-		var cr = Gdk.cairo_create(event.window);
-		var weft = (int) controller.card_scale.get_value() - 1;
-		var card_cols = controller.card_cols;
-		var card_rows = controller.card_rows;
-
-		var width = allocation.width*1.0/card_cols;
-		var height = allocation.height*1.0/card_rows;
-		var radius = double.min(width, height)/2.1;
-
-		var pattern = controller.pattern;
-		if (pattern == null || weft < 0 || weft >= pattern.weft_count) {
-			return true;
-		}
-		var warps = pattern.warp_count;
-		Gdk.cairo_set_source_color(cr, pattern.get_weft_colour(weft));
-		cr.rectangle(0,0, allocation.width, allocation.height);
-		cr.fill();
-		cr.set_source_rgb(0, 0, 0);
-		for (var col = 0; col < card_cols; col++) {
-			for (var row = 0; row < card_rows; row++) {
-				cr.arc((col+0.5)*width, (row+0.5)*height, radius, 0, 2*Math.PI);
-				if (pattern[(col*card_rows+row)%warps, weft]) {
-					cr.fill();
-				} else {
-					cr.stroke();
-				}
-			}
-		}
-		return true;
-	}
-}
-
-
-class Gacquard : Object {
+class Gacquard : Object, Loom.PatternContainer {
 	private const string APP_PATH = "/apps/gacquard";
 	private const string COL_KEY = APP_PATH+"/cols";
 	private const string ROW_KEY = APP_PATH+"/rows";
 	private static int counts = 0;
 
 	private Gtk.DrawingArea card;
-	internal int card_cols;
-	internal int card_rows;
+	private int card_cols;
+	private int card_rows;
 	internal Gtk.Scale card_scale;
 	private GConf.Client conf;
 	private Gtk.Dialog create;
@@ -405,13 +16,13 @@ class Gacquard : Object {
 	private Gtk.ColorSelection create_weft_colour;
 	private string? filename;
 	private string? foldername;
-	private LoomPattern? _pattern;
+	private Loom.Pattern? _pattern;
 	private Gtk.HScale pattern_scale;
 	private Gtk.Dialog prefs;
 	private Gtk.ScrolledWindow pattern_window;
 	private Gtk.Window window;
 
-	internal LoomPattern? pattern {
+	public Loom.Pattern? pattern {
 		get {
 			return _pattern;
 		}
@@ -453,6 +64,51 @@ class Gacquard : Object {
 		new_loom();
 
 		foldername = Environment.get_home_dir();
+	}
+
+	public void get_pattern_container(out Loom.Pattern? pattern, out int rows, out int cols, out int weft) {
+		pattern = this.pattern;
+		rows = card_rows;
+		cols = card_cols;
+		weft = (int)(card_scale.get_value()) - 1;
+	}
+
+	private Gtk.MenuItem create_menu(bool warp, Gtk.AccelGroup accel_group) {
+		var item = new Gtk.MenuItem.with_mnemonic(warp ? "W_arp" : "W_eft");
+		var menu = new Gtk.Menu();
+		var insert_before = new Gtk.MenuItem.with_mnemonic("Insert strand _before");
+		var insert_after = new Gtk.MenuItem.with_mnemonic("Insert strand _after");
+		var remove = new Gtk.MenuItem.with_mnemonic("_Delete strands");
+		var colour = new Gtk.MenuItem.with_mnemonic("Set _colour...");
+		colour.add_accelerator("activate", accel_group, (uint) 'c', warp ? 0 : Gdk.ModifierType.SHIFT_MASK, Gtk.AccelFlags.VISIBLE);
+		var copy = new Gtk.MenuItem.with_mnemonic("Copy strands");
+		var invert = new Gtk.MenuItem.with_mnemonic("Invert strands");
+		var set_warp = new Gtk.MenuItem.with_mnemonic("Make strands warp");
+		var set_weft = new Gtk.MenuItem.with_mnemonic("Make strands weft");
+
+		item.set_submenu(menu);
+		menu.append(insert_before);
+		menu.append(insert_after);
+		menu.append(remove);
+		menu.append(new Gtk.SeparatorMenuItem());
+		menu.append(colour);
+		menu.append(copy);
+		menu.append(new Gtk.SeparatorMenuItem());
+		menu.append(invert);
+		menu.append(set_warp);
+		menu.append(set_weft);
+
+		var area = warp ? Loom.Area.WARP : Loom.Area.WEFT;
+		insert_before.activate.connect(() => { do_action(Loom.Action.INSERT_BEFORE, area); });
+		insert_after.activate.connect(() => { do_action(Loom.Action.INSERT_AFTER, area); });
+		remove.activate.connect(() => { do_action(Loom.Action.DELETE, area); });
+		colour.activate.connect(() => { do_action(Loom.Action.COLOUR, area); });
+		copy.activate.connect(() => { do_action(Loom.Action.COPY, area); });
+		invert.activate.connect(() => { do_action(Loom.Action.INVERT, area); });
+		set_warp.activate.connect(() => { do_action(Loom.Action.SET_WARP, area); });
+		set_weft.activate.connect(() => { do_action(Loom.Action.SET_WEFT, area); });
+
+		return item;
 	}
 
 	Gtk.Expander create_new_panel(string name, string colour_name, int count, out Gtk.SpinButton spin, out Gtk.ColorSelection picker) {
@@ -524,19 +180,21 @@ class Gacquard : Object {
 					       }
 				       });
 
-		var bar = new Gtk.MenuBar();
-		var file_menu = new Gtk.Menu();
 		var accel_group = new Gtk.AccelGroup();
 		window.add_accel_group(accel_group);
 
+		var bar = new Gtk.MenuBar();
+
+		var file_menu = new Gtk.Menu();
 		var file = new Gtk.MenuItem.with_mnemonic("_File");
 		var @new = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.NEW, null);
 		var new_window = new Gtk.MenuItem.with_label("New Window");
 		var open = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.OPEN, null);
+		open.add_accelerator("activate", accel_group, (uint) 'o', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 		var save = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.SAVE, null);
+		save.add_accelerator("activate", accel_group, (uint) 's', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 		var save_as = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.SAVE_AS, null);
 		var preferences = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.PREFERENCES, null);
-		var sep = new Gtk.SeparatorMenuItem();
 		var quit = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.QUIT, accel_group);
 		quit.add_accelerator("activate", accel_group, (uint) 'q', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 
@@ -547,10 +205,40 @@ class Gacquard : Object {
 		file_menu.append(save);
 		file_menu.append(save_as);
 		file_menu.append(preferences);
-		file_menu.append(sep);
+		file_menu.append(new Gtk.SeparatorMenuItem());
 		file_menu.append(quit);
-
 		bar.append(file);
+
+		var edit_menu = new Gtk.Menu();
+		var edit = new Gtk.MenuItem.with_mnemonic("_Edit");
+		var copy = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.COPY, null);
+		var paste = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.PASTE, null);
+		var invert_selection = new Gtk.MenuItem.with_mnemonic("_Invert Selection");
+		invert_selection.add_accelerator("activate", accel_group, (uint) 'i', 0, Gtk.AccelFlags.VISIBLE);
+		var warp_selection = new Gtk.MenuItem.with_mnemonic("Make selection w_arp");
+		warp_selection.add_accelerator("activate", accel_group, (uint) 'a', 0, Gtk.AccelFlags.VISIBLE);
+		var weft_selection = new Gtk.MenuItem.with_mnemonic("Make selection w_eft");
+		weft_selection.add_accelerator("activate", accel_group, (uint) 'e', 0, Gtk.AccelFlags.VISIBLE);
+
+		var zoom_in = new Gtk.MenuItem.with_mnemonic("Zoom in");
+		zoom_in.add_accelerator("activate", accel_group, (uint) '+', 0, Gtk.AccelFlags.VISIBLE);
+		var zoom_out = new Gtk.MenuItem.with_mnemonic("Zoom out");
+		zoom_out.add_accelerator("activate", accel_group, (uint) '-', 0, Gtk.AccelFlags.VISIBLE);
+
+		edit.set_submenu(edit_menu);
+		edit_menu.append(copy);
+		edit_menu.append(paste);
+		edit_menu.append(new Gtk.SeparatorMenuItem());
+		edit_menu.append(invert_selection);
+		edit_menu.append(warp_selection);
+		edit_menu.append(weft_selection);
+		edit_menu.append(new Gtk.SeparatorMenuItem());
+		edit_menu.append(zoom_in);
+		edit_menu.append(zoom_out);
+		bar.append(edit);
+
+		bar.append(create_menu(true, accel_group));
+		bar.append(create_menu(false, accel_group));
 
 		var vbox = new Gtk.VBox(false, 0);
 		window.add(vbox);
@@ -569,7 +257,7 @@ class Gacquard : Object {
 		tab.append_page(pattern_box, new Gtk.Label("Pattern"));
 
 		var card_box = new Gtk.HBox(false, 0);
-		card = new LoomCard(this);
+		card = new Loom.CardView(this);
 		card_scale = new Gtk.VScale.with_range(1, 10, 1);
 		card_scale.value_changed.connect(card.queue_draw);
 		card_scale.digits = 0;
@@ -584,7 +272,7 @@ class Gacquard : Object {
 				if (create.run() == Gtk.ResponseType.ACCEPT) {
 					create.hide();
 					this.filename = null;
-					this.pattern = new LoomPattern(int.max((int)create_warp_spin.value, 1), int.max((int)create_weft_spin.value, 1), create_warp_colour.current_color, create_weft_colour.current_color);
+					this.pattern = new Loom.Pattern(int.max((int)create_warp_spin.value, 1), int.max((int)create_weft_spin.value, 1), create_warp_colour.current_color, create_weft_colour.current_color);
 				}
 			});
 		new_window.activate.connect(() => { new Gacquard(); });
@@ -605,7 +293,7 @@ class Gacquard : Object {
 
 					      if (chooser.run() == Gtk.ResponseType.ACCEPT) {
 						      foldername = chooser.get_current_folder();
-						      var pattern = LoomPattern.open(chooser.get_filename());
+						      var pattern = Loom.Pattern.open(chooser.get_filename());
 						      if (pattern == null) {
 							      var message = new Gtk.MessageDialog(window, Gtk.DialogFlags.MODAL, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE, "Unable to read file %s.", chooser.get_filename());
 							      message.run();
@@ -622,7 +310,22 @@ class Gacquard : Object {
 		preferences.activate.connect(() => { prefs.run(); prefs.hide(); });
 		quit.activate.connect(Gtk.main_quit);
 
+		copy.activate.connect(() => { do_action(Loom.Action.COPY, Loom.Area.SELECTION); });
+		paste.activate.connect(() => { do_action(Loom.Action.PASTE, Loom.Area.SELECTION); });
+		invert_selection.activate.connect(() => { do_action(Loom.Action.INVERT, Loom.Area.SELECTION); });
+		warp_selection.activate.connect(() => { do_action(Loom.Action.SET_WARP, Loom.Area.SELECTION); });
+		weft_selection.activate.connect(() => { do_action(Loom.Action.SET_WEFT, Loom.Area.SELECTION); });
+
+		zoom_in.activate.connect(() => { pattern_scale.set_value(pattern_scale.get_value() + 5); });
+		zoom_out.activate.connect(() => { pattern_scale.set_value(pattern_scale.get_value() - 5); });
+
 		window.show_all();
+	}
+
+	private void do_action(Loom.Action action, Loom.Area area) {
+		if (pattern != null) {
+			pattern.do_action(action, area);
+		}
 	}
 
 	void new_loom() {
@@ -631,11 +334,11 @@ class Gacquard : Object {
 		Gdk.Color.parse("SteelBlue", out warp_c);
 		Gdk.Color.parse("white", out weft_c);
 		filename = null;
-		pattern = new LoomPattern(20, 10, warp_c, weft_c);
+		pattern = new Loom.Pattern(20, 10, warp_c, weft_c);
 	}
 
 	public void open(string filename) {
-		var pattern = LoomPattern.open(filename);
+		var pattern = Loom.Pattern.open(filename);
 		if (pattern == null) {
 			var message = new Gtk.MessageDialog(window, Gtk.DialogFlags.MODAL, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE, "Unable to read file %s.", filename);
 			message.run();
