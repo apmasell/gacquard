@@ -1,4 +1,6 @@
 namespace Loom {
+	const string CLIP_URI = "application/x-gacquard";
+
 	public delegate bool BoolFunc(bool old);
 
 	public delegate void EndOfLineFunc();
@@ -155,7 +157,20 @@ namespace Loom {
 		}
 	}
 
+	private class ClipOwner : Object {
+		private uint8[] data;
+		internal ClipOwner(uint8[] data) {
+			this.data = data;
+		}
+
+		public void get_clip_data(Gtk.Clipboard clipboard, Gtk.SelectionData selection_data, uint info) {
+			selection_data.set(selection_data.target, 8, data);
+		}
+	}
+
 	public class Pattern : Gtk.Widget {
+
+		private Gtk.Clipboard clipboard;
 
 		internal Circular<Gdk.Color?> warp_colours;
 
@@ -184,6 +199,10 @@ namespace Loom {
 		}
 
 		public signal void weft_count_changed(int count);
+
+		construct {
+			clipboard = Gtk.Clipboard.get_for_display(this.get_display(), Gdk.SELECTION_CLIPBOARD);
+		}
 
 		public static Pattern? open(string filename) {
 			var file = FileStream.open(filename, "r");
@@ -348,6 +367,38 @@ namespace Loom {
 						}
 						break;
 				case Action.COPY:
+					var buffer = new StringBuilder();
+					do_on_area(area, (v) => { buffer.append_c(v ? '|' : '-'); return v; }, () => buffer.append_c('\n'));
+					if (buffer.len > 0) {
+							var clip = new ClipOwner(buffer.str.data);
+							clip.ref();
+							var result = clipboard.set_with_owner(new Gtk.TargetEntry[] { Gtk.TargetEntry() { target = CLIP_URI, flags = 0, info = area}}, (clipboard, selection, info, user) => ((ClipOwner)user).get_clip_data(clipboard, selection, info), (clipboard, user) => ((ClipOwner)user).unref(), clip);
+							if (!result) {
+								warning("Failed to set clipboard.");
+							}
+					}
+					break;
+				case Action.PASTE:
+						if (start_warp == -1 || start_weft == -1) {
+							return;
+						}
+						var warp = start_warp;
+						var weft = start_weft;
+					clipboard.request_contents(Gdk.Atom.intern_static_string(CLIP_URI), (clipboard, selection) => {
+						var curr_warp = warp;
+						for (var it = 0; it < selection.length; it++) {
+							var c = selection.data[it];
+							if (c == '\n') {
+								weft++;
+								curr_warp = warp;
+							} else if (c == '|' || c == '-') {
+								wefts[weft][curr_warp++] = c == '|';
+							} else {
+								warning("Got bad character `%c' from clipboard.\n", c);
+							}
+						}
+					});
+					break;
 				case Action.INSERT_BEFORE:
 					switch (area) {
 						case Area.WARP:

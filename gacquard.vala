@@ -212,7 +212,9 @@ class Gacquard : Object, Loom.PatternContainer {
 		var edit_menu = new Gtk.Menu();
 		var edit = new Gtk.MenuItem.with_mnemonic("_Edit");
 		var copy = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.COPY, null);
+		copy.add_accelerator("activate", accel_group, (uint) 'c', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 		var paste = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.PASTE, null);
+		paste.add_accelerator("activate", accel_group, (uint) 'v', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 		var invert_selection = new Gtk.MenuItem.with_mnemonic("_Invert Selection");
 		invert_selection.add_accelerator("activate", accel_group, (uint) 'i', 0, Gtk.AccelFlags.VISIBLE);
 		var warp_selection = new Gtk.MenuItem.with_mnemonic("Make selection w_arp");
