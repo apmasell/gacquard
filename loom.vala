@@ -280,15 +280,20 @@ namespace Loom {
 		}
 
 		public override bool button_release_event(Gdk.EventButton event) {
-			stop_warp = (int) (event.x / box_size) % warp_colours.length;
-			stop_weft = (int) (event.y / box_size) % wefts.length;
 			if (event.button == 1) {
+				stop_warp = (int) (event.x / box_size) % warp_colours.length;
+				stop_weft = (int) (event.y / box_size) % wefts.length;
 				if (start_warp == stop_warp && start_weft == stop_weft) {
 					this.wefts[start_weft][start_warp] = null;
 					start_warp = -1;
 					start_weft = -1;
 				}
 				queue_draw();
+				return true;
+			} else if (event.button == 2) {
+				start_warp = (int) (event.x / box_size) % warp_colours.length;
+				start_weft = (int) (event.y / box_size) % wefts.length;
+				do_action(Action.PASTE, Area.SELECTION);
 				return true;
 			}
 			return false;
@@ -397,7 +402,10 @@ namespace Loom {
 								warning("Got bad character `%c' from clipboard.\n", c);
 							}
 						}
+						this.queue_draw();
 					});
+					start_warp = -1;
+					start_weft = -1;
 					break;
 				case Action.INSERT_BEFORE:
 					switch (area) {
