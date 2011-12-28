@@ -1,6 +1,8 @@
 namespace Loom {
 	public delegate bool BoolFunc(bool old);
 
+	public delegate void EndOfLineFunc();
+
 	public enum Action {
 		COLOUR,
 		COPY,
@@ -19,53 +21,155 @@ namespace Loom {
 		SELECTION
 	}
 
-	struct weft_line {
-		Gdk.Color colour;
-		bool[] warps;
+	public delegate void CircFunc<T>(int index, ref T item);
+	public delegate void CircFillFunc<T>(int index, out T item);
 
-		internal weft_line(int length, Gdk.Color colour) {
-			warps = new bool[length];
+	public class Circular<T> : Object {
+		private T[] items;
+
+		public int length {
+			get {
+				return items.length;
+			}
+		}
+
+		public Circular(int length = 1) {
+			items = new T[length];
+		}
+
+		public Circular.from_array(owned T[] array) {
+			items = (owned) array;
+		}
+
+		public void foreach(CircFunc<T> func, int start = 0, int stop = -1) {
+			start = start % items.length;
+			stop = stop % items.length;
+			if (stop < 0) {
+				stop = (stop + items.length) % items.length;
+			}
+			for (var it = start; it <= (stop < start ? items.length - 1 : stop); it++) {
+				func(it, ref items[it]);
+			}
+			if (stop < start) {
+				for (var it = 0; it <= stop; it++) {
+					func(it, ref items[it]);
+				}
+			}
+		}
+
+		public void fill(CircFillFunc<T> func, int start = 0, int stop = -1) {
+			start = start % items.length;
+			stop = stop % items.length;
+			if (stop < 0) {
+				stop = (stop + items.length) % items.length;
+			}
+			for (var it = start; it <= (stop < start ? items.length - 1 : stop); it++) {
+				func(it, out items[it]);
+			}
+			if (stop < start) {
+				for (var it = 0; it <= stop; it++) {
+					func(it, out items[it]);
+				}
+			}
+		}
+
+		public new T get(int index) {
+			return items[(index + items.length) % items.length];
+		}
+
+		public new void set(int index, T @value) {
+			items[(index + items.length) % items.length] = @value;
+		}
+
+		public void insert(int position, int length, CircFillFunc<T> func) requires (length > 0) {
+			position = ((position % items.length) + items.length) % items.length;
+			var old_length = items.length;
+			items.resize(items.length + length);
+			for (var it = old_length - 1; it >= position; it--) {
+				items[it + length] = (owned) items[it];
+			}
+			for (var it = 0; it < length; it++) {
+				func(it + position, out items[it + position]);
+			}
+		}
+
+		public void @delete(int position, int length) requires (length < items.length) {
+			position = ((position % items.length) + items.length) % items.length;
+			if (position + length > items.length) {
+				for (var it = 0; it < length; it++) {
+					items[it] = (owned) items[it + length];
+				}
+				for (var it = length; it < items.length; it++) {
+					items[it] = null;
+				}
+			} else {
+				for (var it = 0; it < length; it++) {
+					items[it + position] = null;
+				}
+				for (var it = position; it < items.length - length; it++) {
+					items[it] = (owned) items[it + length];
+				}
+			}
+			items.resize(items.length - length);
+		}
+	}
+
+	class Weft : Object {
+		internal Gdk.Color colour { get; set; }
+		Circular<bool> warps;
+
+		internal Weft(int length, Gdk.Color colour) {
+			warps = new Circular<bool>(length);
 			this.colour = colour;
 		}
 
 		internal void delete(int position, int length) {
-			for (var it = position; it < warps.length-length; it++) {
-				warps[it] = warps[it+length];
-			}
-			warps.resize(warps.length-length);
+			warps.delete(position, length);
 		}
+
+		internal void foreach(CircFunc<bool> func, int start, int stop) {
+			warps.foreach(func, start, stop);
+		}
+
+		internal new bool get(int index) {
+			return warps[index];
+		}
+
 		internal void insert(int position) {
-			var new_warps = new bool[warps.length+1];
-			for (var it = 0; it < warps.length; it++) {
-				new_warps[it+(it < position ? 0 : 1)] = warps[it];
+			warps.insert(position, 1, (it, out warp) => warp = false);
+		}
+
+		internal new void set(int index, bool? @value) {
+			if (@value == null) {
+				warps[index] = !warps[index];
+			} else {
+				warps[index] = @value;
 			}
-			warps = (owned) new_warps;
 		}
 
 		internal void to_file(FileStream file) {
+			unowned FileStream ufile = file;
 			file.printf("%s ", colour.to_string());
-			foreach (var b in warps) {
-				file.printf("%c", b ? '|' : '-');
-			}
+			warps.foreach((it, b) => ufile.printf("%c", b ? '|' : '-'));
 			file.putc('\n');
 		}
 	}
 
 	public class Pattern : Gtk.Widget {
 
-		private Gdk.Color[] warp_colours;
+		internal Circular<Gdk.Color?> warp_colours;
 
-		private weft_line[] wefts;
+		internal Circular<Weft> wefts;
 
 		public int box_size { get; set; default = 30; }
 
-		private int start_weft = -1;
+		internal int start_weft = -1;
 
-		private int start_warp = -1;
+		internal int start_warp = -1;
 
-		private int stop_weft = -1;
+		internal int stop_weft = -1;
 
-		private int stop_warp = -1;
+		internal int stop_warp = -1;
 
 		public int weft_count {
 			get {
@@ -92,15 +196,17 @@ namespace Loom {
 				warning("Bad header in %s\n", filename);
 				return null;
 			}
-			var warp_colours = new Gdk.Color[colours.length-1];
+			var warp_colours = new Circular<Gdk.Color?>(colours.length-1);
 			for (var it = 0; it < warp_colours.length; it++) {
-				if (!Gdk.Color.parse(colours[it+1], out warp_colours[it])) {
-					warning("Bad warp colour %s in %s\n", colours[it+1], filename);
+				Gdk.Color colour;
+				if (!Gdk.Color.parse(colours[it+1], out colour)) {
+					warning("Bad warp colour %s in %s\n", colours[it + 1], filename);
 					return null;
 				}
+				warp_colours[it] = colour;
 			}
 
-			weft_line[] wefts = {};
+			Weft[] wefts = {};
 			string line;
 			while ((line = file.read_line()) != null) {
 				var parts = line.split(" ");
@@ -118,40 +224,36 @@ namespace Loom {
 					return null;
 				}
 
-				wefts += weft_line(colours.length, colour);
+				wefts += new Weft(colours.length, colour);
 
 				for (var it = 0; it < colours.length; it++) {
-					wefts[wefts.length-1].warps[it] = parts[1][it] == '|';
+					wefts[wefts.length-1][it] = parts[1][it] == '|';
 				}
 			}
 			if (wefts.length == 0) {
 				warning("No weft lines in %s\n", filename);
 				return null;
 			}
-			return new Pattern.array((owned) warp_colours, (owned) wefts);
+			return new Pattern.array(warp_colours, new Circular<Weft>.from_array((owned) wefts));
 		}
 
 		public Pattern(int warps, int wefts, Gdk.Color weft_colour, Gdk.Color warp_colour) {
-			warp_colours = new Gdk.Color[warps];
-			for (var it = 0; it < warps; it++) {
-				warp_colours[it] = warp_colour;
-			}
-			this.wefts = new weft_line[wefts];
-			for (var it = 0; it < wefts; it++) {
-				this.wefts[it] = weft_line(warps, weft_colour);
-			}
+			warp_colours = new Circular<Gdk.Color?>(warps);
+			warp_colours.fill((it, out v) => v = warp_colour);
+			this.wefts = new Circular<Weft>(wefts);
+			this.wefts.fill ((it, out weft) => weft = new Weft(warps, weft_colour));
 		}
 
-		Pattern.array(owned Gdk.Color[] colours, owned weft_line[] wefts) {
-			warp_colours = (owned) colours;
-			this.wefts = (owned) wefts;
+		Pattern.array(Circular<Gdk.Color?> colours, Circular<Weft> wefts) {
+			warp_colours = colours;
+			this.wefts = wefts;
 		}
 
 		public override bool button_press_event(Gdk.EventButton event) {
 			if (event.type == Gdk.EventType.BUTTON_PRESS) {
 				if (event.button == 1) {
-					start_warp = (int) (event.x/box_size)%warp_colours.length;
-					start_weft = (int) (event.y/box_size)%wefts.length;
+					start_warp = (int) (event.x / box_size) % warp_colours.length;
+					start_weft = (int) (event.y / box_size) % wefts.length;
 					return true;
 				}
 			}
@@ -159,11 +261,11 @@ namespace Loom {
 		}
 
 		public override bool button_release_event(Gdk.EventButton event) {
-			stop_warp = (int) (event.x/box_size)%warp_colours.length;
-			stop_weft = (int) (event.y/box_size)%wefts.length;
+			stop_warp = (int) (event.x / box_size) % warp_colours.length;
+			stop_weft = (int) (event.y / box_size) % wefts.length;
 			if (event.button == 1) {
 				if (start_warp == stop_warp && start_weft == stop_weft) {
-					this.wefts[start_weft].warps[start_warp] = !this.wefts[start_weft].warps[start_warp];
+					this.wefts[start_weft][start_warp] = null;
 					start_warp = -1;
 					start_weft = -1;
 				}
@@ -186,36 +288,12 @@ namespace Loom {
 			}
 		}
 
-		private void do_on_area(Area area, BoolFunc func) {
-			switch(area) {
-				case Area.WARP:
-					if (start_warp == -1)
-						return;
-					for(var warp = start_warp; warp <= stop_warp; warp++) {
-						for(var weft = 0; weft < wefts.length; weft++) {
-							wefts[weft].warps[warp] = func(wefts[weft].warps[warp]);
-						}
-					}
-					break;
-				case Area.WEFT:
-					if (start_weft == -1)
-						return;
-					for(var weft = start_weft; weft <= stop_weft; weft++) {
-						for(var warp = 0; warp < warp_colours.length; warp++) {
-							wefts[weft].warps[warp] = func(wefts[weft].warps[warp]);
-						}
-					}
-					break;
-				case Area.SELECTION:
-					if (start_warp == -1 || start_weft == -1)
-						return;
-					for(var weft = start_weft; weft <= stop_weft; weft++) {
-						for(var warp = start_warp; warp <= stop_warp; warp++) {
-							wefts[weft].warps[warp] = func(wefts[weft].warps[warp]);
-						}
-					}
-					break;
-			}
+		private void do_on_area(Area area, BoolFunc func, EndOfLineFunc? end_of_line = null) {
+			var sub_warp = area == Area.WARP || area == Area.SELECTION;
+			var sub_weft = area == Area.WEFT || area == Area.SELECTION;
+			if (sub_warp && (start_warp == -1 || stop_warp == -1) || sub_weft && (start_weft == -1 || stop_weft == -1))
+				return;
+			wefts.foreach((i, ref weft) => { weft.foreach((j, ref warp) => warp = func(warp), sub_warp ? start_warp : 0, sub_warp ? stop_warp : -1); if (end_of_line != null) end_of_line(); }, sub_weft ? start_weft : 0, sub_weft ? stop_weft : -1);
 		}
 
 		public void do_action(Action action, Area area) {
@@ -233,13 +311,13 @@ namespace Loom {
 					switch (area) {
 						case Area.WARP:
 							if (start_warp != -1) {
-								delete_warp(start_warp, stop_warp-start_warp+1);
+								delete_warp(start_warp, (stop_warp - start_warp + warp_colours.length) % warp_colours.length + 1);
 								start_warp = -1;
 							}
 							break;
 						case Area.WEFT:
 							if (start_weft != -1) {
-								delete_weft(start_weft, stop_weft-start_weft+1);
+								delete_weft(start_weft, (stop_weft - start_weft + wefts.length) % wefts.length + 1);
 								start_weft = -1;
 							}
 							break;
@@ -249,18 +327,20 @@ namespace Loom {
 					switch (area) {
 						case Area.WARP:
 							if (start_warp != -1) {
-								if (choose_colour(ref warp_colours[start_warp], "Select Warp Colour")) {
-									for (var it = start_warp+1; it <= stop_warp; it++) {
-										warp_colours[it] = warp_colours[start_warp];
+								Gdk.Color colour = warp_colours[start_warp];
+								if (choose_colour(ref colour, "Select Warp Colour")) {
+									for (var it = start_warp; it <= stop_warp; it++) {
+										warp_colours[it] = colour;
 									}
 								}
 							}
 							break;
 						case Area.WEFT:
 							if (start_weft != -1) {
-								if (choose_colour(ref wefts[start_weft].colour, "Select Weft Colour")) {
-									for (var it = start_weft+1; it <= stop_weft; it++) {
-										wefts[it].colour = wefts[start_weft].colour;
+								var colour = wefts[start_weft].colour;
+								if (choose_colour(ref colour, "Select Weft Colour")) {
+									for (var it = start_weft; it <= stop_weft; it++) {
+										wefts[it].colour = colour;
 									}
 								}
 							}
@@ -304,32 +384,19 @@ namespace Loom {
 			queue_draw();
 		}
 
-		public void delete_warp(int position, int length = 1) requires(position >= 0 && position < warp_count && length > 0) {
-			if (warp_colours.length-length < 1)
+		public void delete_warp(int position, int length = 1) {
+			assert(position >= 0 && position < warp_count && length > 0);
+			if (warp_colours.length - length < 1)
 				return;
-			for (var it = 0; it < wefts.length; it++) {
-				wefts[it].delete(position, length);
-			}
-			for (var it = position; it < warp_colours.length-length; it++) {
-				warp_colours[it] = warp_colours[it+length];
-			}
-			for (var it = 1; it <= length; it++) {
-				warp_colours[warp_colours.length-it] = {};
-			}
-			warp_colours.resize(warp_colours.length-length);
+			warp_colours.delete(position, length);
+			wefts.foreach((it, ref weft) => weft.delete(position, length));
 			queue_resize();
 		}
 
-		public void delete_weft(int position, int length = 1) requires(position >= 0 && position < weft_count && length > 0) {
+		public void delete_weft(int position, int length = 1) requires (position >= 0 && position < weft_count && length > 0) {
 			if (wefts.length-length < 1)
 				return;
-			for (var it = position; it < wefts.length-length; it++) {
-				wefts[it] = (owned) wefts[it+length];
-			}
-			for (var it = 1; it <= length; it++) {
-				wefts[wefts.length-it] = {};
-			}
-			wefts.resize(wefts.length-length);
+			wefts.delete(position, length);
 			weft_count_changed(wefts.length);
 			queue_resize();
 		}
@@ -340,32 +407,32 @@ namespace Loom {
 			context.rectangle(event.area.x, event.area.y, event.area.width, event.area.height);
 			context.clip();
 			context.set_line_width(1);
-			var max_wefts = allocation.height/box_size+1;
-			var max_warps = allocation.width/box_size+1;
+			var max_wefts = allocation.height / box_size + 1;
+			var max_warps = allocation.width / box_size + 1;
 			for (var weft = 0; weft < max_wefts; weft++) {
 				for (var warp = 0; warp < max_warps; warp++) {
-					var norm_weft = weft%wefts.length;
-					var norm_warp = warp%warp_colours.length;
-					var top = wefts[norm_weft].warps[norm_warp];
+					var norm_weft = weft % wefts.length;
+					var norm_warp = warp % warp_colours.length;
+					var top = wefts[weft][warp];
 					Gdk.cairo_set_source_color(context, top ? warp_colours[norm_warp] : wefts[norm_weft].colour);
-					context.rectangle(warp*box_size, weft*box_size, box_size, box_size);
+					context.rectangle(warp * box_size, weft * box_size, box_size, box_size);
 					context.fill();
 					context.set_source_rgba(0, 0, 0, (weft < wefts.length && warp < warp_colours.length) ? 1 : 0.5);
-					context.rectangle(warp*box_size, weft*box_size, box_size, box_size);
+					context.rectangle(warp * box_size, weft * box_size, box_size, box_size);
 					var selected_weft = start_weft != -1 && (start_weft <= stop_weft ? (norm_weft >= start_weft && norm_weft <= stop_weft) : (norm_weft >= start_weft || norm_weft <= stop_weft));
 					var selected_warp = start_warp != -1 && (start_warp <= stop_warp ? (norm_warp >= start_warp && norm_warp <= stop_warp) : (norm_warp >= start_warp || norm_warp <= stop_warp));
 					if (selected_warp || selected_weft) {
 						double dash_length = box_size / (selected_warp && selected_weft ? 8 : 4);
-						context.set_dash(new double[] { dash_length, dash_length/2 }, 0);
+						context.set_dash(new double[] { dash_length, dash_length / 2 }, 0);
 					}
 					context.stroke();
 					context.set_dash(null, 0);
 					if (top) {
-						context.move_to(warp*box_size+box_size/2, weft*box_size+box_size/4);
-						context.rel_line_to(0, box_size/2);
+						context.move_to(warp * box_size + box_size / 2, weft * box_size + box_size / 4);
+						context.rel_line_to(0, box_size / 2);
 					} else {
-						context.move_to(warp*box_size+box_size/4, weft*box_size+box_size/2);
-						context.rel_line_to(box_size/2, 0);
+						context.move_to(warp * box_size + box_size / 4, weft * box_size + box_size / 2);
+						context.rel_line_to(box_size / 2, 0);
 					}
 					context.stroke();
 				}
@@ -373,26 +440,18 @@ namespace Loom {
 			return true;
 		}
 
-		public void insert_warp(int position, Gdk.Color? colour = null) requires(position >= 0 && position <= warp_count) {
+		public void insert_warp(int position, Gdk.Color? colour = null) requires (position >= 0 && position <= warp_count) {
 			for (var it = 0; it < wefts.length; it++) {
 				wefts[it].insert(position);
 			}
-			var new_warp_colours = new Gdk.Color[warp_colours.length+1];
-			for (var it = 0; it < warp_colours.length; it++) {
-				new_warp_colours[it+(it < position ? 0 : 1)] = warp_colours[it];
-			}
-			new_warp_colours[position] = colour ?? warp_colours[position == 0 ? 1 : position-1];
-			warp_colours = (owned) new_warp_colours;
+			Gdk.Color new_colour = colour ?? warp_colours[position == 0 ? 1 : position - 1];
+			warp_colours.insert(position, 1, (it, out warp_colour) => warp_colour = new_colour);
 			queue_resize();
 		}
 
-		public void insert_weft(int position, Gdk.Color? colour = null) requires(position >= 0 && position <= weft_count) {
-			var length = warp_colours.length;
-			wefts.resize(wefts.length+1);
-			for (var it = wefts.length-2; it >= position; it--) {
-				wefts[it+1] = (owned) wefts[it];
-			}
-			wefts[position] = weft_line(length, colour ?? wefts[position == 0 ? 1 : position-1].colour);
+		public void insert_weft(int position, Gdk.Color? colour = null) requires (position >= 0 && position <= weft_count) {
+			Gdk.Color new_colour = colour ?? wefts[position == 0 ? 1 : position - 1].colour;
+			wefts.insert(position, 1, (it, out weft) => weft = new Weft(warp_colours.length, new_colour));
 			weft_count_changed(wefts.length);
 			queue_resize();
 		}
@@ -427,39 +486,36 @@ namespace Loom {
 			set_flags(Gtk.WidgetFlags.REALIZED);
 		}
 
-		public new bool get(int warp, int weft) requires(warp >= 0 && warp<warp_count && weft >= 0 && weft < weft_count) {
-			return wefts[weft].warps[warp];
+		public new bool get(int warp, int weft) requires (warp >= 0 && warp < warp_count && weft >= 0 && weft < weft_count) {
+			return wefts[weft][warp];
 		}
 
-		public Gdk.Color get_warp_colour(int warp) requires(warp >= 0 && warp < warp_count) {
+		public Gdk.Color get_warp_colour(int warp) requires (warp >= 0 && warp < warp_count) {
 			return warp_colours[warp];
 		}
 
-		public Gdk.Color get_weft_colour(int weft) requires(weft >= 0 && weft < weft_count) {
+		public Gdk.Color get_weft_colour(int weft) requires (weft >= 0 && weft < weft_count) {
 			return wefts[weft].colour;
 		}
 
-		public new void set(int warp, int weft, bool @value) requires(warp >= 0 && warp<warp_count && weft >= 0 && weft < weft_count) {
-			wefts[weft].warps[warp] = @value;
+		public new void set(int warp, int weft, bool @value) requires (warp >= 0 && warp<warp_count && weft >= 0 && weft < weft_count) {
+			wefts[weft][warp] = @value;
 		}
 
-		public void set_warp_colour(int warp, Gdk.Color colour) requires(warp >= 0 && warp < warp_count) {
+		public void set_warp_colour(int warp, Gdk.Color colour) requires (warp >= 0 && warp < warp_count) {
 			warp_colours[warp] = colour;
 		}
 
-		public void set_weft_colour(int weft, Gdk.Color colour) requires(weft >= 0 && weft < weft_count) {
+		public void set_weft_colour(int weft, Gdk.Color colour) requires (weft >= 0 && weft < weft_count) {
 			wefts[weft].colour = colour;
 		}
 
 		public void to_file(FileStream file) {
+			unowned FileStream ufile = file;
 			file.printf("GACQUARD");
-			foreach (var colour in warp_colours) {
-				file.printf(" %s", colour.to_string());
-			}
+			warp_colours.foreach((it, ref colour) => ufile.printf(" %s", colour.to_string()));
 			file.putc('\n');
-			for (var it = 0; it < wefts.length; it++) {
-				wefts[it].to_file(file);
-			}
+			wefts.foreach((it, ref weft) => weft.to_file(ufile));
 		}
 	}
 
