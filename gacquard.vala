@@ -211,6 +211,8 @@ class Gacquard : Object, Loom.PatternContainer {
 
 		var edit_menu = new Gtk.Menu();
 		var edit = new Gtk.MenuItem.with_mnemonic("_Edit");
+		var undo = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.UNDO, null);
+		undo.add_accelerator("activate", accel_group, (uint) 'z', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 		var copy = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.COPY, null);
 		copy.add_accelerator("activate", accel_group, (uint) 'c', Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE);
 		var paste = new Gtk.ImageMenuItem.from_stock(Gtk.Stock.PASTE, null);
@@ -228,6 +230,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		zoom_out.add_accelerator("activate", accel_group, (uint) '-', 0, Gtk.AccelFlags.VISIBLE);
 
 		edit.set_submenu(edit_menu);
+		edit_menu.append(undo);
 		edit_menu.append(copy);
 		edit_menu.append(paste);
 		edit_menu.append(new Gtk.SeparatorMenuItem());
@@ -312,6 +315,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		preferences.activate.connect(() => { prefs.run(); prefs.hide(); });
 		quit.activate.connect(Gtk.main_quit);
 
+		undo.activate.connect(() => { do_action(Loom.Action.UNDO, Loom.Area.SELECTION); });
 		copy.activate.connect(() => { do_action(Loom.Action.COPY, Loom.Area.SELECTION); });
 		paste.activate.connect(() => { do_action(Loom.Action.PASTE, Loom.Area.SELECTION); });
 		invert_selection.activate.connect(() => { do_action(Loom.Action.INVERT, Loom.Area.SELECTION); });

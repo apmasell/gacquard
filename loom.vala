@@ -14,7 +14,8 @@ namespace Loom {
 		INVERT,
 		PASTE,
 		SET_WARP,
-		SET_WEFT
+		SET_WEFT,
+		UNDO
 	}
 
 	public enum Area {
@@ -168,6 +169,85 @@ namespace Loom {
 		}
 	}
 
+	private enum UndoAction {
+		CHANGE,
+		COLOUR_WARP,
+		COLOUR_WEFT,
+		INSERT_WARP,
+		INSERT_WEFT,
+		DELETE_WARP,
+		DELETE_WEFT
+	}
+	struct undo_record {
+		UndoAction action;
+		int warp;
+		int weft;
+		bool state;
+		Gdk.Color colour;
+		internal undo_record.change(int warp, int weft, bool state) {
+			action = UndoAction.CHANGE;
+			this.warp = warp;
+			this.weft = weft;
+			this.state = state;
+		}
+		internal undo_record.colour_warp(int warp, Gdk.Color colour) {
+			action = UndoAction.COLOUR_WARP;
+			this.warp = warp;
+			this.colour = colour;
+		}
+		internal undo_record.colour_weft(int weft, Gdk.Color colour) {
+			action = UndoAction.COLOUR_WEFT;
+			this.weft = weft;
+			this.colour = colour;
+		}
+		internal undo_record.insert_warp(int warp) {
+			action = UndoAction.INSERT_WARP;
+			this.warp = warp;
+		}
+		internal undo_record.insert_weft(int weft) {
+			action = UndoAction.INSERT_WEFT;
+			this.weft = weft;
+		}
+		internal undo_record.delete_warp(int warp, Gdk.Color colour) {
+			action = UndoAction.DELETE_WARP;
+			this.warp = warp;
+			this.colour = colour;
+		}
+		internal undo_record.delete_weft(int weft, Gdk.Color colour) {
+			action = UndoAction.DELETE_WEFT;
+			this.weft = weft;
+			this.colour = colour;
+		}
+
+		internal void reverse(Pattern pattern) {
+			switch (action) {
+				case UndoAction.CHANGE:
+					pattern[warp, weft] = state;
+					break;
+				case UndoAction.COLOUR_WARP:
+					pattern.set_warp_colour(warp, colour);
+					break;
+				case UndoAction.COLOUR_WEFT:
+					pattern.set_weft_colour(weft, colour);
+					break;
+				case UndoAction.INSERT_WARP:
+					pattern.delete_warp(warp);
+					break;
+				case UndoAction.INSERT_WEFT:
+					pattern.delete_weft(weft);
+					break;
+				case UndoAction.DELETE_WARP:
+					pattern.insert_warp(warp, colour);
+					break;
+				case UndoAction.DELETE_WEFT:
+					pattern.insert_weft(weft, colour);
+					break;
+				default:
+					assert_not_reached();
+			}
+		}
+	}
+
 	public class Pattern : Gtk.Widget {
 
 		private Gtk.Clipboard clipboard;
@@ -186,6 +266,10 @@ namespace Loom {
 
 		internal int stop_warp = -1;
 
+		private undo_record[] undo_actions;
+
+		private int[] undo_history;
+
 		public int weft_count {
 			get {
 				return wefts.length;
@@ -202,6 +286,8 @@ namespace Loom {
 
 		construct {
 			clipboard = Gtk.Clipboard.get_for_display(this.get_display(), Gdk.SELECTION_CLIPBOARD);
+			undo_actions = {};
+			undo_history = {};
 		}
 
 		public static Pattern? open(string filename) {
@@ -284,7 +370,9 @@ namespace Loom {
 				stop_warp = (int) (event.x / box_size) % warp_colours.length;
 				stop_weft = (int) (event.y / box_size) % wefts.length;
 				if (start_warp == stop_warp && start_weft == stop_weft) {
-					this.wefts[start_weft][start_warp] = null;
+					undo_history += undo_actions.length;
+					undo_actions += undo_record.change(start_warp, start_weft, wefts[start_weft][start_warp]);
+					wefts[start_weft][start_warp] = null;
 					start_warp = -1;
 					start_weft = -1;
 				}
@@ -312,12 +400,20 @@ namespace Loom {
 			}
 		}
 
-		private void do_on_area(Area area, BoolFunc func, EndOfLineFunc? end_of_line = null) {
+		private void do_on_area(Area area, BoolFunc func, EndOfLineFunc? end_of_line = null, bool undoable = true) {
 			var sub_warp = area == Area.WARP || area == Area.SELECTION;
 			var sub_weft = area == Area.WEFT || area == Area.SELECTION;
 			if (sub_warp && (start_warp == -1 || stop_warp == -1) || sub_weft && (start_weft == -1 || stop_weft == -1))
 				return;
-			wefts.foreach((i, ref weft) => { weft.foreach((j, ref warp) => warp = func(warp), sub_warp ? start_warp : 0, sub_warp ? stop_warp : -1); if (end_of_line != null) end_of_line(); }, sub_weft ? start_weft : 0, sub_weft ? stop_weft : -1);
+			if (undoable) {
+				undo_history += undo_actions.length;
+			}
+			wefts.foreach((i, ref weft) => { weft.foreach((j, ref warp) => {
+					if (undoable) {
+						undo_actions += undo_record.change(j, i, warp);
+					}
+					warp = func(warp);
+				}, sub_warp ? start_warp : 0, sub_warp ? stop_warp : -1); if (end_of_line != null) end_of_line(); }, sub_weft ? start_weft : 0, sub_weft ? stop_weft : -1);
 		}
 
 		public void do_action(Action action, Area area) {
@@ -335,12 +431,16 @@ namespace Loom {
 					switch (area) {
 						case Area.WARP:
 							if (start_warp != -1) {
+								do_on_area(area, (v) => { return v; });
+								warp_colours.foreach((i, ref colour) => { undo_actions += undo_record.delete_warp(i, colour); }, start_warp, stop_warp);
 								delete_warp(start_warp, (stop_warp - start_warp + warp_colours.length) % warp_colours.length + 1);
 								start_warp = -1;
 							}
 							break;
 						case Area.WEFT:
 							if (start_weft != -1) {
+								do_on_area(area, (v) => { return v; });
+								wefts.foreach((i, ref weft) => { undo_actions += undo_record.delete_weft(i, weft.colour); }, start_weft, stop_weft);
 								delete_weft(start_weft, (stop_weft - start_weft + wefts.length) % wefts.length + 1);
 								start_weft = -1;
 							}
@@ -353,7 +453,9 @@ namespace Loom {
 							if (start_warp != -1) {
 								Gdk.Color colour = warp_colours[start_warp];
 								if (choose_colour(ref colour, "Select Warp Colour")) {
+									undo_history += undo_actions.length;
 									for (var it = start_warp; it <= stop_warp; it++) {
+										undo_actions += undo_record.colour_warp(it, warp_colours[it]);
 										warp_colours[it] = colour;
 									}
 								}
@@ -363,7 +465,9 @@ namespace Loom {
 							if (start_weft != -1) {
 								var colour = wefts[start_weft].colour;
 								if (choose_colour(ref colour, "Select Weft Colour")) {
+									undo_history += undo_actions.length;
 									for (var it = start_weft; it <= stop_weft; it++) {
+										undo_actions += undo_record.colour_weft(it, wefts[it].colour);
 										wefts[it].colour = colour;
 									}
 								}
@@ -397,6 +501,8 @@ namespace Loom {
 					switch (area) {
 						case Area.WARP:
 							if (start_warp != -1) {
+								undo_history += undo_actions.length;
+								undo_actions += undo_record.insert_warp(start_warp);
 								insert_warp(start_warp);
 								start_warp++;
 								stop_warp = stop_warp == -1 ? -1 : (stop_warp+1);
@@ -404,6 +510,8 @@ namespace Loom {
 							break;
 						case Area.WEFT:
 							if (start_weft != -1) {
+								undo_history += undo_actions.length;
+								undo_actions += undo_record.insert_weft(start_weft);
 								insert_weft(start_weft);
 								start_weft++;
 								stop_weft = stop_weft == -1 ? -1 : (stop_weft+1);
@@ -415,15 +523,32 @@ namespace Loom {
 					switch (area) {
 						case Area.WARP:
 							if (start_warp != -1) {
-								insert_warp(int.max(start_warp, stop_warp)+1);
+								var position = int.max(start_warp, stop_warp)+1;
+								undo_history += undo_actions.length;
+								undo_actions += undo_record.insert_warp(position);
+								insert_warp(position);
 							}
 							break;
 						case Area.WEFT:
 							if (start_weft != -1) {
-								insert_weft(int.max(start_weft, stop_weft)+1);
+								var position = int.max(start_weft, stop_weft)+1;
+								undo_history += undo_actions.length;
+								undo_actions += undo_record.insert_weft(position);
+								insert_weft(position);
 							}
 							break;
 						}
+					break;
+				case Action.UNDO:
+					if (undo_history.length < 1)
+						return;
+
+					while(undo_actions.length > undo_history[undo_history.length - 1]) {
+						undo_actions[undo_actions.length - 1].reverse(this);
+						undo_actions[undo_actions.length - 1] = {};
+						undo_actions.length--;
+					}
+					undo_history.length--;
 					break;
 			}
 			queue_draw();
@@ -439,12 +564,14 @@ namespace Loom {
 				return;
 			}
 			var curr_warp = start_warp;
+			undo_history += undo_actions.length;
 			for (var it = 0; it < selection.length; it++) {
 				var c = selection.data[it];
 				if (c == '\n') {
 					start_weft++;
 					curr_warp = start_warp;
 				} else if (c == '|' || c == '-') {
+					undo_actions += undo_record.change(curr_warp, start_weft, wefts[start_weft][curr_warp]);
 					wefts[start_weft][curr_warp++] = c == '|';
 				} else {
 					warning("Got bad character `%c' from clipboard.\n", c);
