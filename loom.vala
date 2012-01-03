@@ -384,28 +384,14 @@ namespace Loom {
 					}
 					break;
 				case Action.PASTE:
-						if (start_warp == -1 || start_weft == -1) {
-							return;
-						}
-						var warp = start_warp;
-						var weft = start_weft;
-					clipboard.request_contents(Gdk.Atom.intern_static_string(CLIP_URI), (clipboard, selection) => {
-						var curr_warp = warp;
-						for (var it = 0; it < selection.length; it++) {
-							var c = selection.data[it];
-							if (c == '\n') {
-								weft++;
-								curr_warp = warp;
-							} else if (c == '|' || c == '-') {
-								wefts[weft][curr_warp++] = c == '|';
-							} else {
-								warning("Got bad character `%c' from clipboard.\n", c);
-							}
-						}
-						this.queue_draw();
-					});
-					start_warp = -1;
-					start_weft = -1;
+					if (start_warp == -1 || start_weft == -1) {
+						start_warp = -1;
+						start_weft = -1;
+						stop_warp = -1;
+						stop_weft = -1;
+						return;
+					}
+					clipboard.request_contents(Gdk.Atom.intern_static_string(CLIP_URI), this.receive_paste);
 					break;
 				case Action.INSERT_BEFORE:
 					switch (area) {
@@ -443,6 +429,33 @@ namespace Loom {
 			queue_draw();
 		}
 
+		void receive_paste(Gtk.Clipboard clipboard, Gtk.SelectionData selection) {
+			if (selection.length == -1 || start_warp == -1 || start_weft == -1) {
+				start_warp = -1;
+				start_weft = -1;
+				stop_warp = -1;
+				stop_weft = -1;
+				this.queue_draw();
+				return;
+			}
+			var curr_warp = start_warp;
+			for (var it = 0; it < selection.length; it++) {
+				var c = selection.data[it];
+				if (c == '\n') {
+					start_weft++;
+					curr_warp = start_warp;
+				} else if (c == '|' || c == '-') {
+					wefts[start_weft][curr_warp++] = c == '|';
+				} else {
+					warning("Got bad character `%c' from clipboard.\n", c);
+				}
+			}
+			this.queue_draw();
+			start_warp = -1;
+			start_weft = -1;
+			stop_warp = -1;
+			stop_weft = -1;
+		}
 		public void delete_warp(int position, int length = 1) {
 			assert(position >= 0 && position < warp_count && length > 0);
 			if (warp_colours.length - length < 1)
