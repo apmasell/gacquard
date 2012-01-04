@@ -150,11 +150,10 @@ namespace Loom {
 			}
 		}
 
-		internal void to_file(FileStream file) {
-			unowned FileStream ufile = file;
-			file.printf("%s ", colour.to_string());
-			warps.foreach((it, b) => ufile.printf("%c", b ? '|' : '-'));
-			file.putc('\n');
+		internal string to_string() {
+			char[] buffer = new char[warps.length];
+			warps.foreach((it, ref b) => buffer[it] = b ? '|' : '-');
+			return ((string)buffer).dup();
 		}
 	}
 
@@ -178,6 +177,7 @@ namespace Loom {
 		DELETE_WARP,
 		DELETE_WEFT
 	}
+
 	struct undo_record {
 		UndoAction action;
 		int warp;
@@ -252,6 +252,8 @@ namespace Loom {
 
 		private Gtk.Clipboard clipboard;
 
+		private KeyFile keyfile;
+
 		internal Circular<Gdk.Color?> warp_colours;
 
 		internal Circular<Weft> wefts;
@@ -290,56 +292,54 @@ namespace Loom {
 			undo_history = {};
 		}
 
-		public static Pattern? open(string filename) {
-			var file = FileStream.open(filename, "r");
-			if (file == null) {
-				warning("Unable to open file %s\n", filename);
+		public static Pattern? open(string filename) throws KeyFileError, FileError {
+			var file = new KeyFile();
+			if (!file.load_from_file(filename, KeyFileFlags.NONE)) {
 				return null;
 			}
-			var colours = (file.read_line()?? "").split(" ");
-			if (colours[0] != "GACQUARD") {
-				warning("Bad header in %s\n", filename);
-				return null;
+			if (file.get_integer("Gacquard", "Version") > 1) {
+				throw new KeyFileError.INVALID_VALUE("Version not supported.");
 			}
-			var warp_colours = new Circular<Gdk.Color?>(colours.length-1);
+			var colours = file.get_string_list("Gacquard", "WarpColours");
+			if (colours.length == 0) {
+				throw new KeyFileError.INVALID_VALUE("No warp colours are in the file.");
+			}
+			var warp_colours = new Circular<Gdk.Color?>(colours.length);
 			for (var it = 0; it < warp_colours.length; it++) {
 				Gdk.Color colour;
-				if (!Gdk.Color.parse(colours[it+1], out colour)) {
-					warning("Bad warp colour %s in %s\n", colours[it + 1], filename);
-					return null;
+				if (!Gdk.Color.parse(colours[it], out colour)) {
+					throw new KeyFileError.INVALID_VALUE(@"Bad warp colour $(colours[it])");
 				}
 				warp_colours[it] = colour;
 			}
 
-			Weft[] wefts = {};
-			string line;
-			while ((line = file.read_line()) != null) {
-				var parts = line.split(" ");
-				Gdk.Color colour = {};
-				if (parts.length != 2) {
-					warning("Bad weft line `%s' in %s: wrong number of spaces\n", line, filename);
-					return null;
+			var lines = file.get_string_list("Gacquard", "Pattern");
+			colours = file.get_string_list("Gacquard", "WeftColours");
+			if (lines.length != colours.length) {
+				throw new KeyFileError.INVALID_VALUE("The number of weft colours does not match the number of wefts");
+			}
+
+			Weft[] wefts = new Weft[colours.length];
+			for (var weft = 0; weft < colours.length; weft++) {
+				if (lines[weft].length != warp_colours.length) {
+					throw new KeyFileError.INVALID_VALUE("The number of warp strands does not match the number of warp colours.");
 				}
-				if (parts[1].length != colours.length-1) {
-					warning("Bad weft line `%s' in %s: wrong number of warps\n", line, filename);
-					return null;
-				}
-				if (!Gdk.Color.parse(parts[0], out colour)) {
-					warning("Bad weft color `%s' in %s\n", parts[0], filename);
-					return null;
+				Gdk.Color colour;
+				if (!Gdk.Color.parse(colours[weft], out colour)) {
+					throw new KeyFileError.INVALID_VALUE(@"Bad weft color $(colours[weft]).");
 				}
 
-				wefts += new Weft(colours.length, colour);
+				wefts[weft] = new Weft(warp_colours.length, colour);
 
-				for (var it = 0; it < colours.length; it++) {
-					wefts[wefts.length-1][it] = parts[1][it] == '|';
+				for (var it = 0; it < warp_colours.length; it++) {
+					wefts[weft][it] = lines[weft][it] == '|';
 				}
 			}
 			if (wefts.length == 0) {
 				warning("No weft lines in %s\n", filename);
 				return null;
 			}
-			return new Pattern.array(warp_colours, new Circular<Weft>.from_array((owned) wefts));
+			return new Pattern.array(warp_colours, new Circular<Weft>.from_array((owned) wefts), (owned) file);
 		}
 
 		public Pattern(int warps, int wefts, Gdk.Color weft_colour, Gdk.Color warp_colour) {
@@ -347,11 +347,13 @@ namespace Loom {
 			warp_colours.fill((it, out v) => v = warp_colour);
 			this.wefts = new Circular<Weft>(wefts);
 			this.wefts.fill ((it, out weft) => weft = new Weft(warps, weft_colour));
+			keyfile = new KeyFile();
 		}
 
-		Pattern.array(Circular<Gdk.Color?> colours, Circular<Weft> wefts) {
+		Pattern.array(Circular<Gdk.Color?> colours, Circular<Weft> wefts, owned KeyFile file) {
 			warp_colours = colours;
 			this.wefts = wefts;
+			keyfile = (owned) file;
 		}
 
 		public override bool button_press_event(Gdk.EventButton event) {
@@ -709,12 +711,24 @@ namespace Loom {
 			wefts[weft].colour = colour;
 		}
 
-		public void to_file(FileStream file) {
-			unowned FileStream ufile = file;
-			file.printf("GACQUARD");
-			warp_colours.foreach((it, ref colour) => ufile.printf(" %s", colour.to_string()));
-			file.putc('\n');
-			wefts.foreach((it, ref weft) => weft.to_file(ufile));
+		public bool to_file(string filename) throws FileError {
+			keyfile.set_integer("Gacquard", "Version", 1);
+			var buffer = new StringBuilder();
+			string[] colours = {};
+			warp_colours.foreach((it, ref colour) =>  {
+					colours += colour.to_string();
+				});
+			keyfile.set_string_list("Gacquard", "WarpColours", colours);
+			buffer.truncate();
+			string[] lines = {};
+			colours = {};
+			wefts.foreach((it, ref weft) => {
+					colours += weft.colour.to_string();
+					lines += weft.to_string();
+				});
+			keyfile.set_string_list("Gacquard", "WeftColours", colours);
+			keyfile.set_string_list("Gacquard", "Pattern", lines);
+			return FileUtils.set_contents(filename, keyfile.to_data());
 		}
 	}
 

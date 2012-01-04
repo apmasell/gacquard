@@ -142,22 +142,22 @@ class Gacquard : Object, Loom.PatternContainer {
 		row_spin.numeric = true;
 		row_spin.value = card_rows;
 		row_spin.value_changed.connect((source) => {
-						       try {
-							       conf.set_int(ROW_KEY, (int) source.value);
-						       } catch(Error e) {
-							       warning("Failed to update GConf: %s\n", e.message);
-						       }
-					       });
+				try {
+					conf.set_int(ROW_KEY, (int) source.value);
+				} catch(Error e) {
+					warning("Failed to update GConf: %s\n", e.message);
+				}
+			});
 		var col_spin = new Gtk.SpinButton.with_range(4, 100, 1);
 		col_spin.numeric = true;
 		col_spin.value = card_cols;
 		col_spin.value_changed.connect((source) => {
-						       try {
-							       conf.set_int(COL_KEY, (int) source.value);
-						       } catch(Error e) {
-							       warning("Failed to update GConf: %s\n", e.message);
-						       }
-					       });
+				try {
+					conf.set_int(COL_KEY, (int) source.value);
+				} catch(Error e) {
+					warning("Failed to update GConf: %s\n", e.message);
+				}
+			});
 
 		var size_box = new Gtk.HBox(false, 0);
 		size_box.pack_start(row_spin, false, false, 0);
@@ -175,10 +175,10 @@ class Gacquard : Object, Loom.PatternContainer {
 		window.title = "Loom Editor";
 		window.set_default_size(600, 500);
 		window.destroy.connect(() => {
-					       if (AtomicInt.dec_and_test(ref counts)) {
-						       Gtk.main_quit();
-					       }
-				       });
+				if (AtomicInt.dec_and_test(ref counts)) {
+					Gtk.main_quit();
+				}
+			});
 
 		var accel_group = new Gtk.AccelGroup();
 		window.add_accel_group(accel_group);
@@ -282,34 +282,38 @@ class Gacquard : Object, Loom.PatternContainer {
 			});
 		new_window.activate.connect(() => { new Gacquard(); });
 		open.activate.connect(() => {
-					      var chooser = new Gtk.FileChooserDialog("Open Pattern", window, Gtk.FileChooserAction.OPEN, Gtk.Stock.CANCEL, Gtk.ResponseType.CANCEL, Gtk.Stock.OPEN, Gtk.ResponseType.ACCEPT);
-					      var filter = new Gtk.FileFilter();
-					      filter.set_name("Gacquard");
-					      filter.add_pattern("*.gloom");
-					      chooser.add_filter(filter);
-					      var all_filter = new Gtk.FileFilter();
-					      all_filter.set_name("All Files");
-					      all_filter.add_pattern("*");
-					      chooser.add_filter(all_filter);
-					      chooser.local_only = true;
-					      if (foldername != null) {
-						      chooser.set_current_folder(foldername);
-					      }
+				var chooser = new Gtk.FileChooserDialog("Open Pattern", window, Gtk.FileChooserAction.OPEN, Gtk.Stock.CANCEL, Gtk.ResponseType.CANCEL, Gtk.Stock.OPEN, Gtk.ResponseType.ACCEPT);
+				var filter = new Gtk.FileFilter();
+				filter.set_name("Gacquard");
+				filter.add_pattern("*.gloom");
+				chooser.add_filter(filter);
+				var all_filter = new Gtk.FileFilter();
+				all_filter.set_name("All Files");
+				all_filter.add_pattern("*");
+				chooser.add_filter(all_filter);
+				chooser.local_only = true;
+				if (foldername != null) {
+					chooser.set_current_folder(foldername);
+				}
 
-					      if (chooser.run() == Gtk.ResponseType.ACCEPT) {
-						      foldername = chooser.get_current_folder();
-						      var pattern = Loom.Pattern.open(chooser.get_filename());
-						      if (pattern == null) {
-							      var message = new Gtk.MessageDialog(window, Gtk.DialogFlags.MODAL, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE, "Unable to read file %s.", chooser.get_filename());
-							      message.run();
-							      message.hide();
-						      } else {
-							      this.filename = chooser.get_filename();
-							      this.pattern = pattern;
-						      }
-					      }
-					      chooser.hide();
-				      });
+				if (chooser.run() == Gtk.ResponseType.ACCEPT) {
+					foldername = chooser.get_current_folder();
+					try {
+						var pattern = Loom.Pattern.open(chooser.get_filename());
+						if (pattern == null) {
+							display_error("Unable to read file %s.", chooser.get_filename());
+						} else {
+							this.filename = chooser.get_filename();
+							this.pattern = pattern;
+						}
+					} catch (FileError e) {
+						display_error(e.message, chooser.get_filename());
+					} catch (KeyFileError e) {
+						display_error(e.message, chooser.get_filename());
+					}
+				}
+				chooser.hide();
+			});
 		save.activate.connect(() => { save_file(false); });
 		save_as.activate.connect(() => { save_file(true); });
 		preferences.activate.connect(() => { prefs.run(); prefs.hide(); });
@@ -344,14 +348,18 @@ class Gacquard : Object, Loom.PatternContainer {
 	}
 
 	public void open(string filename) {
-		var pattern = Loom.Pattern.open(filename);
-		if (pattern == null) {
-			var message = new Gtk.MessageDialog(window, Gtk.DialogFlags.MODAL, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE, "Unable to read file %s.", filename);
-			message.run();
-			message.hide();
-		} else {
-			this.filename = filename;
-			this.pattern = pattern;
+		try {
+			var pattern = Loom.Pattern.open(filename);
+			if (pattern == null) {
+			display_error("Unable to read file %s.", filename);
+			} else {
+				this.filename = filename;
+				this.pattern = pattern;
+			}
+		} catch (KeyFileError e) {
+			display_error(e.message, filename);
+		} catch (FileError e) {
+			display_error(e.message, filename);
 		}
 	}
 
@@ -378,14 +386,19 @@ class Gacquard : Object, Loom.PatternContainer {
 				return;
 			}
 		}
-		var file = FileStream.open(filename, "w");
-		if (file == null) {
-			var message = new Gtk.MessageDialog(window, Gtk.DialogFlags.MODAL, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE, "Unable to write to file %s.", filename);
-			message.run();
-			message.hide();
-		} else {
-			pattern.to_file(file);
+		try {
+			if (!pattern.to_file(filename)) {
+				display_error("Could not save to file.", filename);
+			}
+		} catch (FileError e) {
+				display_error(e.message, filename);
 		}
+	}
+
+	void display_error(string error, string title) {
+		var message = new Gtk.MessageDialog(window, Gtk.DialogFlags.MODAL, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE, error, title);
+		message.run();
+		message.hide();
 	}
 
 	void update_conf() {
@@ -407,6 +420,7 @@ class Gacquard : Object, Loom.PatternContainer {
 
 public static void main(string[] args) {
 	Gtk.init(ref args);
+	Gtk.Window.set_default_icon_name("application-x-it87");
 	for (var it = 1; it < args.length; it++) {
 		var window = new Gacquard();
 		window.open(args[it]);
