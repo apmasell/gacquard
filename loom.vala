@@ -264,6 +264,10 @@ namespace Loom {
 
 		internal int start_warp = -1;
 
+		private double start_x;
+
+		private double start_y;
+
 		internal int stop_weft = -1;
 
 		internal int stop_warp = -1;
@@ -359,6 +363,8 @@ namespace Loom {
 		public override bool button_press_event(Gdk.EventButton event) {
 			if (event.type == Gdk.EventType.BUTTON_PRESS) {
 				if (event.button == 1) {
+					start_x = event.x;
+					start_y = event.y;
 					start_warp = (int) (event.x / box_size) % warp_colours.length;
 					start_weft = (int) (event.y / box_size) % wefts.length;
 					return true;
@@ -369,8 +375,7 @@ namespace Loom {
 
 		public override bool button_release_event(Gdk.EventButton event) {
 			if (event.button == 1) {
-				stop_warp = (int) (event.x / box_size) % warp_colours.length;
-				stop_weft = (int) (event.y / box_size) % wefts.length;
+				recompute_start_stop(event.x, event.y);
 				if (start_warp == stop_warp && start_weft == stop_weft) {
 					undo_history += undo_actions.length;
 					undo_actions += undo_record.change(start_warp, start_weft, wefts[start_weft][start_warp]);
@@ -381,8 +386,6 @@ namespace Loom {
 				queue_draw();
 				return true;
 			} else if (event.button == 2) {
-				start_warp = (int) (event.x / box_size) % warp_colours.length;
-				start_weft = (int) (event.y / box_size) % wefts.length;
 				do_action(Action.PASTE, Area.SELECTION);
 				return true;
 			}
@@ -665,8 +668,7 @@ namespace Loom {
 
 		public override bool motion_notify_event(Gdk.EventMotion event) {
 			if (Gdk.ModifierType.BUTTON1_MASK in event.state) {
-				stop_warp = (int) (event.x/box_size)%warp_colours.length;
-				stop_weft = (int) (event.y/box_size)%wefts.length;
+				recompute_start_stop(event.x, event.y);
 				queue_draw();
 				return true;
 			}
@@ -685,6 +687,23 @@ namespace Loom {
 			this.style = this.style.attach(this.window);
 			this.style.set_background(this.window, Gtk.StateType.NORMAL);
 			set_flags(Gtk.WidgetFlags.REALIZED);
+		}
+
+		public void recompute_start_stop(double x, double y) {
+			if (y < start_y) {
+				start_weft = (int) (y / box_size) % wefts.length;
+				stop_weft = (int) (start_y / box_size) % wefts.length;
+			} else {
+				start_weft = (int) (start_y / box_size) % wefts.length;
+				stop_weft = (int) (y / box_size) % wefts.length;
+			}
+			if (x < start_x) {
+				start_warp = (int) (x / box_size) % warp_colours.length;
+				stop_warp = (int) (start_x / box_size) % warp_colours.length;
+			} else {
+				start_warp = (int) (start_x / box_size) % warp_colours.length;
+				stop_warp = (int) (x / box_size) % warp_colours.length;
+			}
 		}
 
 		public new bool get(int warp, int weft) requires (warp >= 0 && warp < warp_count && weft >= 0 && weft < weft_count) {
