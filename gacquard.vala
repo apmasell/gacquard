@@ -85,6 +85,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		var invert = new Gtk.MenuItem.with_mnemonic("_Invert strands");
 		var set_warp = new Gtk.MenuItem.with_mnemonic("Make strands wa_rp");
 		var set_weft = new Gtk.MenuItem.with_mnemonic("Make strands we_ft");
+		var checker = new Gtk.MenuItem.with_mnemonic("Make a_lternating");
 
 		item.set_submenu(menu);
 		menu.append(insert_before);
@@ -97,6 +98,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		menu.append(invert);
 		menu.append(set_warp);
 		menu.append(set_weft);
+		menu.append(checker);
 
 		var area = warp ? Loom.Area.WARP : Loom.Area.WEFT;
 		insert_before.activate.connect(() => { do_action(Loom.Action.INSERT_BEFORE, area); });
@@ -107,6 +109,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		invert.activate.connect(() => { do_action(Loom.Action.INVERT, area); });
 		set_warp.activate.connect(() => { do_action(Loom.Action.SET_WARP, area); });
 		set_weft.activate.connect(() => { do_action(Loom.Action.SET_WEFT, area); });
+		checker.activate.connect(() => { do_action(Loom.Action.CHECKER, area); });
 
 		return item;
 	}
@@ -223,6 +226,8 @@ class Gacquard : Object, Loom.PatternContainer {
 		warp_selection.add_accelerator("activate", accel_group, (uint) 'a', 0, Gtk.AccelFlags.VISIBLE);
 		var weft_selection = new Gtk.MenuItem.with_mnemonic("Make selection w_eft");
 		weft_selection.add_accelerator("activate", accel_group, (uint) 'e', 0, Gtk.AccelFlags.VISIBLE);
+		var alt_selection = new Gtk.MenuItem.with_mnemonic("Make a_lternating");
+		alt_selection.add_accelerator("activate", accel_group, (uint) 'l', 0, Gtk.AccelFlags.VISIBLE);
 
 		var zoom_in = new Gtk.MenuItem.with_mnemonic("Zoom in");
 		zoom_in.add_accelerator("activate", accel_group, (uint) '+', 0, Gtk.AccelFlags.VISIBLE);
@@ -237,6 +242,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		edit_menu.append(invert_selection);
 		edit_menu.append(warp_selection);
 		edit_menu.append(weft_selection);
+		edit_menu.append(alt_selection);
 		edit_menu.append(new Gtk.SeparatorMenuItem());
 		edit_menu.append(zoom_in);
 		edit_menu.append(zoom_out);
@@ -325,6 +331,7 @@ class Gacquard : Object, Loom.PatternContainer {
 		invert_selection.activate.connect(() => { do_action(Loom.Action.INVERT, Loom.Area.SELECTION); });
 		warp_selection.activate.connect(() => { do_action(Loom.Action.SET_WARP, Loom.Area.SELECTION); });
 		weft_selection.activate.connect(() => { do_action(Loom.Action.SET_WEFT, Loom.Area.SELECTION); });
+		alt_selection.activate.connect(() => { do_action(Loom.Action.CHECKER, Loom.Area.SELECTION); });
 
 		zoom_in.activate.connect(() => { pattern_scale.set_value(pattern_scale.get_value() + 5); });
 		zoom_out.activate.connect(() => { pattern_scale.set_value(pattern_scale.get_value() - 5); });

@@ -1,11 +1,12 @@
 namespace Loom {
 	const string CLIP_URI = "application/x-gacquard";
 
-	public delegate bool BoolFunc(bool old);
+	public delegate bool BoolFunc(int warp, int weft, bool old);
 
 	public delegate void EndOfLineFunc();
 
 	public enum Action {
+		CHECKER,
 		COLOUR,
 		COPY,
 		DELETE,
@@ -117,12 +118,17 @@ namespace Loom {
 		}
 	}
 
+	bool xor(bool a, bool b) {
+		return a && !b || !a && b;
+	}
+
 	class Weft : Object {
 		internal Gdk.Color colour { get; set; }
 		Circular<bool> warps;
 
-		internal Weft(int length, Gdk.Color colour) {
+		internal Weft(int length, Gdk.Color colour, bool even = false) {
 			warps = new Circular<bool>(length);
+			warps.foreach((it, ref val) => val = xor(even, it % 2 == 0));
 			this.colour = colour;
 		}
 
@@ -350,7 +356,7 @@ namespace Loom {
 			warp_colours = new Circular<Gdk.Color?>(warps);
 			warp_colours.fill((it, out v) => v = warp_colour);
 			this.wefts = new Circular<Weft>(wefts);
-			this.wefts.fill ((it, out weft) => weft = new Weft(warps, weft_colour));
+			this.wefts.fill ((it, out weft) => weft = new Weft(warps, weft_colour, it % 2 == 0));
 			keyfile = new KeyFile();
 		}
 
@@ -417,26 +423,29 @@ namespace Loom {
 					if (undoable) {
 						undo_actions += undo_record.change(j, i, warp);
 					}
-					warp = func(warp);
+					warp = func(j, i, warp);
 				}, sub_warp ? start_warp : 0, sub_warp ? stop_warp : -1); if (end_of_line != null) end_of_line(); }, sub_weft ? start_weft : 0, sub_weft ? stop_weft : -1);
 		}
 
 		public void do_action(Action action, Area area) {
 			switch(action) {
 				case Action.INVERT:
-					do_on_area(area, (v) => { return !v; });
+					do_on_area(area, (warp, weft, v) => { return !v; });
 					break;
 				case Action.SET_WARP:
-					do_on_area(area, (v) => { return true; });
+					do_on_area(area, (warp, weft, v) => { return true; });
 					break;
 				case Action.SET_WEFT:
-					do_on_area(area, (v) => { return false; });
+					do_on_area(area, (warp, weft, v) => { return false; });
+					break;
+				case Action.CHECKER:
+					do_on_area(area, (warp, weft, v) => { return xor(warp % 2 == 0, weft % 2 == 0); });
 					break;
 				case Action.DELETE:
 					switch (area) {
 						case Area.WARP:
 							if (start_warp != -1) {
-								do_on_area(area, (v) => { return v; });
+								do_on_area(area, (warp, weft, v) => { return v; });
 								warp_colours.foreach((i, ref colour) => { undo_actions += undo_record.delete_warp(i, colour); }, start_warp, stop_warp);
 								delete_warp(start_warp, (stop_warp - start_warp + warp_colours.length) % warp_colours.length + 1);
 								start_warp = -1;
@@ -444,7 +453,7 @@ namespace Loom {
 							break;
 						case Area.WEFT:
 							if (start_weft != -1) {
-								do_on_area(area, (v) => { return v; });
+								do_on_area(area, (warp, weft, v) => { return v; });
 								wefts.foreach((i, ref weft) => { undo_actions += undo_record.delete_weft(i, weft.colour); }, start_weft, stop_weft);
 								delete_weft(start_weft, (stop_weft - start_weft + wefts.length) % wefts.length + 1);
 								start_weft = -1;
@@ -482,7 +491,7 @@ namespace Loom {
 						break;
 				case Action.COPY:
 					var buffer = new StringBuilder();
-					do_on_area(area, (v) => { buffer.append_c(v ? '|' : '-'); return v; }, () => buffer.append_c('\n'));
+					do_on_area(area, (warp, weft, v) => { buffer.append_c(v ? '|' : '-'); return v; }, () => buffer.append_c('\n'));
 					if (buffer.len > 0) {
 							var clip = new ClipOwner(buffer.str.data);
 							clip.ref();
