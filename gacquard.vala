@@ -82,9 +82,9 @@ class Gacquard : Object, Loom.PatternContainer {
 		var colour = new Gtk.MenuItem.with_mnemonic("Set _colour...");
 		colour.add_accelerator("activate", accel_group, (uint) 'c', warp ? 0 : Gdk.ModifierType.SHIFT_MASK, Gtk.AccelFlags.VISIBLE);
 		var copy = new Gtk.MenuItem.with_mnemonic("Copy strands");
-		var invert = new Gtk.MenuItem.with_mnemonic("Invert strands");
-		var set_warp = new Gtk.MenuItem.with_mnemonic("Make strands warp");
-		var set_weft = new Gtk.MenuItem.with_mnemonic("Make strands weft");
+		var invert = new Gtk.MenuItem.with_mnemonic("_Invert strands");
+		var set_warp = new Gtk.MenuItem.with_mnemonic("Make strands wa_rp");
+		var set_weft = new Gtk.MenuItem.with_mnemonic("Make strands we_ft");
 
 		item.set_submenu(menu);
 		menu.append(insert_before);
