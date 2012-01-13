@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
+  <mime-type type="image/x-gacquard">
+  
+    <comment>Loom pattern</comment>
+    
+    <sub-class-of type="text/plain"/>
+    
+    <magic priority="80">
+      <match type="string" offset="0:100" value="[Gacquard]"/>
+    </magic>
+
+    <glob pattern="*.gloom"/>
+
+  </mime-type>
+</mime-info>

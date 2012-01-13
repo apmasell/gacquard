@@ -1,0 +1,22 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Categories=Graphics;VectorGraphics;GTK;
+Comment=Create and edit Jacquard loom patterns
+Exec=gacquard %F
+GenericName=Loom Editor
+Icon=gacquard
+MimeType=image/x-gacquard;
+Name=Gacquard
+Path=
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+TryExec=gacquard
+Type=Application
+Version=1.0
+X-Ayatana-Desktop-Shortcuts=Drawing
+
+[Drawing Shortcut Group]
+Exec=gacquard
+Name=New Loom Pattern
+TargetEnvironment=Unity

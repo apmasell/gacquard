@@ -290,8 +290,9 @@ class Gacquard : Object, Loom.PatternContainer {
 		open.activate.connect(() => {
 				var chooser = new Gtk.FileChooserDialog("Open Pattern", window, Gtk.FileChooserAction.OPEN, Gtk.Stock.CANCEL, Gtk.ResponseType.CANCEL, Gtk.Stock.OPEN, Gtk.ResponseType.ACCEPT);
 				var filter = new Gtk.FileFilter();
-				filter.set_name("Gacquard");
+				filter.set_name("Loom Patterns");
 				filter.add_pattern("*.gloom");
+				filter.add_mime_type("image/x-gacquard");
 				chooser.add_filter(filter);
 				var all_filter = new Gtk.FileFilter();
 				all_filter.set_name("All Files");
