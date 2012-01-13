@@ -1,4 +1,3 @@
-#!/usr/bin/env xdg-open
 [Desktop Entry]
 Categories=Graphics;VectorGraphics;GTK;
 Comment=Create and edit Jacquard loom patterns
@@ -10,7 +9,6 @@ Name=Gacquard
 Path=
 StartupNotify=true
 Terminal=false
-TerminalOptions=
 TryExec=gacquard
 Type=Application
 Version=1.0
