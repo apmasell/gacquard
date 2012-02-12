@@ -118,17 +118,13 @@ namespace Loom {
 		}
 	}
 
-	bool xor(bool a, bool b) {
-		return a && !b || !a && b;
-	}
-
 	class Weft : Object {
 		internal Gdk.Color colour { get; set; }
 		Circular<bool> warps;
 
 		internal Weft(int length, Gdk.Color colour, bool even = false) {
 			warps = new Circular<bool>(length);
-			warps.foreach((it, ref val) => val = xor(even, it % 2 == 0));
+			warps.foreach((it, ref val) => val = even != (it % 2 == 0));
 			this.colour = colour;
 		}
 
@@ -439,7 +435,7 @@ namespace Loom {
 					do_on_area(area, (warp, weft, v) => { return false; });
 					break;
 				case Action.CHECKER:
-					do_on_area(area, (warp, weft, v) => { return xor(warp % 2 == 0, weft % 2 == 0); });
+					do_on_area(area, (warp, weft, v) => { return (warp % 2 == 0) != (weft % 2 == 0); });
 					break;
 				case Action.DELETE:
 					switch (area) {
