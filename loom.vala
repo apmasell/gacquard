@@ -278,6 +278,8 @@ namespace Loom {
 
 		private int[] undo_history;
 
+		private bool was_selection;
+
 		public int weft_count {
 			get {
 				return wefts.length;
@@ -379,11 +381,17 @@ namespace Loom {
 			if (event.button == 1) {
 				recompute_start_stop(event.x, event.y);
 				if (start_warp == stop_warp && start_weft == stop_weft) {
-					undo_history += undo_actions.length;
-					undo_actions += undo_record.change(start_warp, start_weft, wefts[start_weft][start_warp]);
-					wefts[start_weft][start_warp] = null;
+					if (was_selection) {
+						was_selection = false;
+					} else {
+						undo_history += undo_actions.length;
+						undo_actions += undo_record.change(start_warp, start_weft, wefts[start_weft][start_warp]);
+						wefts[start_weft][start_warp] = null;
+					}
 					start_warp = -1;
 					start_weft = -1;
+				} else {
+					was_selection = true;
 				}
 				queue_draw();
 				return true;
