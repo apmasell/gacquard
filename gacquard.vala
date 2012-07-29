@@ -428,6 +428,7 @@ class Gacquard : Object, Loom.PatternContainer {
 
 public static void main(string[] args) {
 	Gtk.init(ref args);
+	GLib.Environment.set_application_name("gacquard");
 	Gtk.Window.set_default_icon_name("application-x-it87");
 	for (var it = 1; it < args.length; it++) {
 		var window = new Gacquard();
