@@ -1,0 +1,30 @@
+ 1489  ./configure 
+ 1490  aclocal
+ 1491  ./configure 
+ 1492  autoheader 
+ 1493  ./configure 
+ 1494  automake --force-missing --add-missing
+ 1495  autoconf 
+ 1496  autoupdate 
+ 1497  ./configure 
+ 1498  autoconf 
+ 1499  ./configure 
+ 1500  ibtoolize --force
+ 1501  libtoolize --force
+ 1502  aclocal
+ 1503  autoheader 
+ 1504  automake --force-missing --add-missing
+ 1505  autoconf 
+ 1506  ./configure 
+ 1507  sudo apt-get install gconf-2.0
+ 1508  ./configure 
+ 1509  ls -lctrh
+ 1510  echo ' sudo apt-get install libgconf2-dev' >> mayNeedThis.txt
+ 1511  ls -lctrh
+ 1512  cat mayNeedThis.txt 
+ 1513  history 
+ 1514  history | tail
+ 1515  tail --help
+ 1516  history | tail -n20
+ 1517  history | tail -n30
+ 1518  history | tail -n30 > mayNeedThis2.txt 
