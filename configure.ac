@@ -1,4 +1,4 @@
-AC_INIT([gacquard], [1.0], [andre@masella.name], [gacquard], [http://github.com/apmasell/gacquard])
+AC_INIT([gacquard],[1.0],[andre@masella.name],[gacquard],[http://github.com/apmasell/gacquard])
 AC_CONFIG_SRCDIR([Makefile.am])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_HEADERS(config.h)
@@ -10,7 +10,7 @@ AM_MAINTAINER_MODE
 AC_PROG_CC
 AM_PROG_CC_C_O
 AC_DISABLE_STATIC
-AC_PROG_LIBTOOL
+LT_INIT
 AC_PROG_LN_S
 
 AC_PATH_PROG(VALAC, valac, valac)

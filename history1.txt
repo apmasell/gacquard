@@ -1,0 +1,10 @@
+ 1471  ls -lctrh   debian/
+ 1472  ls -lctrh   debian/source/
+ 1473  tree
+ 1474  aclocal
+ 1475  ls -lctrh
+ 1476  autoconf 
+ 1477  ls -lctrh
+ 1478  ./configure 
+ 1479  history | tail
+ 1480  history | tail > history1.txt
